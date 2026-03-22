@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * DepthShooter.jsx (v19)
+ * DepthShooter.jsx (v20)
  *
- * 修正（v18 → v19）
- * - 重大バグ修正：createEnemy() が欠落しており、初期スポーン/通常スポーン時に ReferenceError が発生し
- *   画面が表示されないケースがありました。関数を復元し、全ルートで使用。
- * - 他は v18 の仕様（無制限Wave、各Wave+2体、Wave>5で同時出現4体、開始Wave選択、開始時スポーン保証、
- *   画像/BGM/探索/貫通・非貫通/リザルト演出 等）を維持。
+ * 変更点（v19 → v20）
+ * - GitHub Pages（プロジェクトページ配下）でもアセットが 404 にならないよう、
+ *   Vite の import.meta.env.BASE_URL に追従する withBase() を導入。
+ *   すべてのアセットURL（敵/プレイヤー画像、BGM、リザルト画像）を withBase('assets/xxx') に変更。
+ * - v19 の修正（createEnemy 復元）や v18 の機能（任意Wave開始／開始時スポーン保証）を維持。
  */
 
 // 盤面定数
@@ -22,15 +22,29 @@ const ENEMY1 = 1; // 2回攻撃ごとに直進
 const ENEMY2 = 2; // 毎ターン直進
 const ENEMY3 = 3; // 毎ターン 下/左下/右下 のいずれか
 
-// 固定アセットパス
+// Vite BASE_URL に追従する安全なヘルパー
+const withBase = (p) => {
+  try {
+    const base = (import.meta && import.meta.env && typeof import.meta.env.BASE_URL === 'string')
+      ? import.meta.env.BASE_URL.replace(/\/+$/, '')
+      : '';
+    const clean = p.startsWith('/') ? p.slice(1) : p;
+    return `${base}/${clean}`;
+  } catch { // SSR/テスト等で import.meta が未定義な場合の保険
+    const clean = p.startsWith('/') ? p.slice(1) : p;
+    return `/${clean}`;
+  }
+};
+
+// 固定アセットパス（withBase 経由）
 const ASSETS = {
-  ENEMY1: '/src/assets/en1.png',
-  ENEMY2: '/src/assets/en2.png',
-  ENEMY3: '/src/assets/en3.png',
-  PLAYER: '/src/assets/player.png',
-  BGM: '/src/assets/famipop3.mp3',
-  RESULT_WAVE: '/src/assets/yes.png',   // 任意
-  RESULT_GAMEOVER: '/src/assets/oh.png' // 任意
+  ENEMY1: withBase('src/assets/en1.png'),
+  ENEMY2: withBase('src/assets/en2.png'),
+  ENEMY3: withBase('src/assets/en3.png'),
+  PLAYER: withBase('src/assets/player.png'),
+  BGM: withBase('src/assets/bgm.mp3'),
+  RESULT_WAVE: withBase('src/assets/wave_clear.png'),
+  RESULT_GAMEOVER: withBase('src/assets/game_over.png')
 };
 
 function PlayerSvg({ size = 22 }) {
@@ -63,7 +77,7 @@ function useSfx(enabled = true, volume = 0.6) {
 // --- ユーティリティ（純粋関数） ---
 function shuffled(arr) { const a = arr.slice(); for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; }
 
-// ★ 欠落していた敵個体生成を復元
+// 敵個体生成
 function createEnemy(alwaysVisible) {
   const t = [ENEMY1, ENEMY2, ENEMY3][Math.floor(Math.random()*3)];
   return { t, id: `${Date.now()}-${Math.random().toString(36).slice(2,8)}`, revealed: !!alwaysVisible };
@@ -326,7 +340,7 @@ export default function DepthShooter() {
       <audio ref={bgmRef} src={ASSETS.BGM} loop preload="auto" />
 
       <div style={styles.headerRow}>
-        <h1 style={styles.title}>5×7 グリッド + 1×5 プレイヤー（v19：createEnemy 復元 / 開始スポーン保証 / 任意Wave開始）</h1>
+        <h1 style={styles.title}>5×7 グリッド + 1×5 プレイヤー（v20：BASE_URL対応 / 開始スポーン保証 / 任意Wave開始）</h1>
         <div style={styles.headerBtns}><button onClick={handleRestartAll} style={{...styles.btn, ...styles.btnSecondary}}>最初から</button></div>
       </div>
 
@@ -355,7 +369,7 @@ export default function DepthShooter() {
           <label style={styles.formRow}>命中エフェクトサイズ: <input type="range" min={20} max={60} step={1} value={hitSize} onChange={(e)=>setHitSize(parseInt(e.target.value,10))} style={{marginLeft:8}} /> {hitSize}px</label>
 
           <div style={{fontWeight:700, marginTop:10}}>BGM</div>
-          <label style={styles.formRow}><input type="checkbox" checked={bgmOn} onChange={(e)=>setBgmOn(e.target.checked)} /> BGMを有効にする（/assets/bgm.mp3）</label>
+          <label style={styles.formRow}><input type="checkbox" checked={bgmOn} onChange={(e)=>setBgmOn(e.target.checked)} /> BGMを有効にする</label>
           <label style={styles.formRow}>BGM 音量: <input type="range" min={0} max={1} step={0.01} value={bgmVol} onChange={(e)=>setBgmVol(parseFloat(e.target.value))} style={{marginLeft:8}} /> {Math.round(bgmVol*100)}%</label>
 
           <div style={{fontWeight:700, marginTop:10}}>開始Wave</div>
@@ -363,7 +377,7 @@ export default function DepthShooter() {
             <input type="text" value={startWaveInput} onChange={(e)=>setStartWaveInput(e.target.value)}
                    placeholder="1" style={{padding:'8px 10px',borderRadius:10,border:'1px solid rgba(71,85,105,0.6)',background:'rgba(15,23,42,0.4)',color:'#e5e7eb',width:110}} />
             <button onClick={applyStartWave} style={{...styles.btn, ...styles.btnPrimary}}>そのWaveから開始</button>
-            <div style={{color:'#94a3b8', fontSize:12}}>※ 1 以上の整数。適用するとその Wave の開始時スポーンが行われます。</div>
+            <div style={{color:'#94a3b8', fontSize:12}}>※ 適用するとその Wave の初期スポーンが即時に行われます。</div>
           </div>
         </div>
       </details>
