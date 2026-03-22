@@ -38,13 +38,13 @@ const withBase = (p) => {
 
 // 固定アセットパス（withBase 経由）
 const ASSETS = {
-  ENEMY1: withBase('src/assets/en1.png'),
-  ENEMY2: withBase('src/assets/en2.png'),
-  ENEMY3: withBase('src/assets/en3.png'),
-  PLAYER: withBase('src/assets/player.png'),
-  BGM: withBase('src/assets/bgm.mp3'),
-  RESULT_WAVE: withBase('src/assets/wave_clear.png'),
-  RESULT_GAMEOVER: withBase('src/assets/game_over.png')
+  ENEMY1: withBase('assets/en1.png'),
+  ENEMY2: withBase('assets/en2.png'),
+  ENEMY3: withBase('assets/en3.png'),
+  PLAYER: withBase('assets/player.png'),
+  BGM: withBase('assets/bgm.mp3'),
+  RESULT_WAVE: withBase('assets/wave_clear.png'),
+  RESULT_GAMEOVER: withBase('assets/game_over.png')
 };
 
 function PlayerSvg({ size = 22 }) {
