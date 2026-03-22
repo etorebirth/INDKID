@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * DepthShooter.jsx (v17)
+ * DepthShooter.jsx (v19)
  *
- * 追加（v16 → v17）
- * - Wave を無制限に継続（Wave1,2,...）。
- * - 各 Wave の総敵数 = 10 + (waveIndex * 2) で増加（Wave が上がる度に +2）。
- * - スポーン上限（1ターンに出現可能な最大体数）は、Wave>5 で 4、それまでは 3。
- * - 最終クリア（ALL CLEAR）の概念は廃止。各 Wave クリア毎に次へ進行可能。
+ * 修正（v18 → v19）
+ * - 重大バグ修正：createEnemy() が欠落しており、初期スポーン/通常スポーン時に ReferenceError が発生し
+ *   画面が表示されないケースがありました。関数を復元し、全ルートで使用。
+ * - 他は v18 の仕様（無制限Wave、各Wave+2体、Wave>5で同時出現4体、開始Wave選択、開始時スポーン保証、
+ *   画像/BGM/探索/貫通・非貫通/リザルト演出 等）を維持。
  */
 
 // 盤面定数
@@ -62,6 +62,12 @@ function useSfx(enabled = true, volume = 0.6) {
 
 // --- ユーティリティ（純粋関数） ---
 function shuffled(arr) { const a = arr.slice(); for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];} return a; }
+
+// ★ 欠落していた敵個体生成を復元
+function createEnemy(alwaysVisible) {
+  const t = [ENEMY1, ENEMY2, ENEMY3][Math.floor(Math.random()*3)];
+  return { t, id: `${Date.now()}-${Math.random().toString(36).slice(2,8)}`, revealed: !!alwaysVisible };
+}
 
 // Wave コンフィグ（動的）
 function getWaveConfig(waveIndex /* 0-based */) {
@@ -165,6 +171,9 @@ export default function DepthShooter() {
   const [remainingToSpawn, setRemainingToSpawn] = useState(() => wave.total);
   const [killedSoFar, setKilledSoFar] = useState(0);
 
+  // 「任意のWaveから開始」入力
+  const [startWaveInput, setStartWaveInput] = useState('1');
+
   // BGM
   const [bgmOn, setBgmOn] = useState(() => (localStorage.getItem('ds_bgm_on') ?? 'true') === 'true');
   const [bgmVol, setBgmVol] = useState(() => parseFloat(localStorage.getItem('ds_bgm_vol') ?? '0.4'));
@@ -176,6 +185,32 @@ export default function DepthShooter() {
   // 命中エフェクト
   const [effects, setEffects] = useState([]);
   const addHitEffect = (r, c) => { const id = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`; setEffects(a=>[...a,{id,r,c}]); setTimeout(()=>setEffects(a=>a.filter(e=>e.id!==id)), 400); };
+
+  // --- 初期スポーン（Wave開始時に最低1体は出現） ---
+  const seedSpawn = (waveIndexParam) => {
+    const w = getWaveConfig(waveIndexParam);
+    const maxSpawn = getMaxSpawnPerTurn(waveIndexParam);
+    const snap = gridRef.current;
+    const next = snap.map(row => row.slice());
+    let spawned = 0;
+    const cols = shuffled([...Array(COLS).keys()]);
+    for (const c of cols) {
+      if (spawned >= maxSpawn) break;
+      if (next[0][c] === EMPTY && Math.random() < w.spawnRate) {
+        next[0][c] = createEnemy(w.alwaysVisible);
+        spawned += 1;
+      }
+    }
+    if (spawned === 0) {
+      for (const c of cols) {
+        if (next[0][c] === EMPTY) { next[0][c] = createEnemy(w.alwaysVisible); spawned = 1; break; }
+      }
+    }
+    if (spawned > 0) {
+      setGrid(next); gridRef.current = next;
+      setRemainingToSpawn(prev => Math.max(0, prev - spawned));
+    }
+  };
 
   // --- 共通：前進（Pure → Apply） ---
   const advance = (turnShots) => {
@@ -235,6 +270,8 @@ export default function DepthShooter() {
     setGrid(empty); gridRef.current = empty;
     setRemainingToSpawn(w.total); setCleared(false); setAoeReady(true);
     setKillsSinceScan(0); setKilledSoFar(0); setCharge(0); setScanAvailable(true); setScanFlash(false);
+    // ★開始時に最低1体スポーン
+    setTimeout(()=>seedSpawn(index), 0);
   };
   const handleNextWave = () => { goToWave(waveIndex + 1); };
 
@@ -246,7 +283,12 @@ export default function DepthShooter() {
     setKillsSinceScan(0); setAoeReady(true); setKilledSoFar(0); setCharge(0);
     setWaveIndex(0); const w = getWaveConfig(0); setRemainingToSpawn(w.total);
     setScanAvailable(true); setScanFlash(false);
+    // ★開始時に最低1体スポーン（Wave1）
+    setTimeout(()=>seedSpawn(0), 0);
   };
+
+  // 初回マウント時：Wave1 の初期スポーンを保証
+  useEffect(() => { if (gridRef.current.flat().every(v=>v===EMPTY)) seedSpawn(0); }, []);
 
   // キーボード
   useEffect(()=>{ const onKey=(e)=>{ const t=(e.target&&e.target.tagName||'').toLowerCase(); if (t==='input'||t==='textarea'||e.isComposing) return; if (e.key==='ArrowLeft'){e.preventDefault(); setPlayerCol(c=>Math.max(0,c-1));} else if(e.key==='ArrowRight'){e.preventDefault(); setPlayerCol(c=>Math.min(COLS-1,c+1));} else if(e.code==='Space'||e.key===' '){e.preventDefault(); handleAttack();} }; window.addEventListener('keydown', onKey); return ()=>window.removeEventListener('keydown', onKey); }, []);
@@ -257,12 +299,12 @@ export default function DepthShooter() {
 
   // 可視判定
   const isAlwaysVisible = wave.alwaysVisible === true;
-  const isVisible = (r, c, cell) => { if (cell===EMPTY) return false; if (isAlwaysVisible) return true; if (cell.revealed) return true; return r === FRONT_ROW; };
+  const isVisible = (r, c, cell) => { if (cell===EMPTY) return false; if (isAlwaysVisible) return true; if (cell.revealed) return true; return r === FRONT_ROW||r === FRONT_ROW+1; };
 
   // 見た目
   const enemyStyle = (t) => { const base={position:'absolute',inset:6,borderRadius:10,boxShadow:'0 0 14px rgba(255,255,255,0.15)'}; if(t===ENEMY1) return {...base,background:'rgba(244,63,94,0.9)'}; if(t===ENEMY2) return {...base,background:'rgba(250,204,21,0.9)'}; if(t===ENEMY3) return {...base,background:'rgba(168,85,247,0.9)'}; return base; };
 
-  // リザルト表示フラグ（無制限Waveのため ALL CLEAR は無し）
+  // リザルト表示フラグ
   const showWaveClear = cleared && !gameOver;
   const showGameOver = gameOver;
 
@@ -271,13 +313,20 @@ export default function DepthShooter() {
 
   const enemyIconFor = (t) => (t===ENEMY1 ? ASSETS.ENEMY1 : t===ENEMY2 ? ASSETS.ENEMY2 : t===ENEMY3 ? ASSETS.ENEMY3 : '');
 
+  // --- 任意Wave開始 UI の適用処理 ---
+  const applyStartWave = () => {
+    const n = Math.max(1, Math.min(9999, parseInt(startWaveInput.replace(/[^0-9]/g, '') || '1', 10)));
+    setStartWaveInput(String(n));
+    goToWave(n - 1);
+  };
+
   return (
     <div style={styles.page}>
       {/* BGM */}
       <audio ref={bgmRef} src={ASSETS.BGM} loop preload="auto" />
 
       <div style={styles.headerRow}>
-        <h1 style={styles.title}>5×7 グリッド + 1×5 プレイヤー（v17：無制限Wave / +2増加 / Wave5で4体同時スポーン）</h1>
+        <h1 style={styles.title}>5×7 グリッド + 1×5 プレイヤー（v19：createEnemy 復元 / 開始スポーン保証 / 任意Wave開始）</h1>
         <div style={styles.headerBtns}><button onClick={handleRestartAll} style={{...styles.btn, ...styles.btnSecondary}}>最初から</button></div>
       </div>
 
@@ -295,10 +344,11 @@ export default function DepthShooter() {
         {showWaveClear && <div style={styles.cleared}>WAVE CLEAR!</div>}
       </div>
 
-      {/* 設定（SFX/BGM） */}
+      {/* 設定（SFX/BGM/開始Wave） */}
       <details style={styles.settings}>
-        <summary style={{cursor:'pointer'}}>設定（SFX / BGM）</summary>
+        <summary style={{cursor:'pointer'}}>設定（SFX / BGM / 開始Wave）</summary>
         <div style={styles.settingsBody}>
+          <div style={{fontWeight:700, marginTop:4}}>SFX</div>
           <label style={styles.formRow}><input type="checkbox" checked={sfxOn} onChange={(e)=>setSfxOn(e.target.checked)} /> 効果音を有効にする</label>
           <label style={styles.formRow}>SFX音量: <input type="range" min={0} max={1} step={0.01} value={sfxVol} onChange={(e)=>setSfxVol(parseFloat(e.target.value))} style={{marginLeft:8}} /> {Math.round(sfxVol*100)}%</label>
           <label style={styles.formRow}>命中エフェクト色: <input type="color" value={hitColor} onChange={(e)=>setHitColor(e.target.value)} style={{marginLeft:8}} /></label>
@@ -307,6 +357,14 @@ export default function DepthShooter() {
           <div style={{fontWeight:700, marginTop:10}}>BGM</div>
           <label style={styles.formRow}><input type="checkbox" checked={bgmOn} onChange={(e)=>setBgmOn(e.target.checked)} /> BGMを有効にする（/assets/bgm.mp3）</label>
           <label style={styles.formRow}>BGM 音量: <input type="range" min={0} max={1} step={0.01} value={bgmVol} onChange={(e)=>setBgmVol(parseFloat(e.target.value))} style={{marginLeft:8}} /> {Math.round(bgmVol*100)}%</label>
+
+          <div style={{fontWeight:700, marginTop:10}}>開始Wave</div>
+          <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+            <input type="text" value={startWaveInput} onChange={(e)=>setStartWaveInput(e.target.value)}
+                   placeholder="1" style={{padding:'8px 10px',borderRadius:10,border:'1px solid rgba(71,85,105,0.6)',background:'rgba(15,23,42,0.4)',color:'#e5e7eb',width:110}} />
+            <button onClick={applyStartWave} style={{...styles.btn, ...styles.btnPrimary}}>そのWaveから開始</button>
+            <div style={{color:'#94a3b8', fontSize:12}}>※ 1 以上の整数。適用するとその Wave の開始時スポーンが行われます。</div>
+          </div>
         </div>
       </details>
 
